@@ -81,7 +81,7 @@ n
 EOF
 
 # Запускаем установку с конфигом
-bash -c "$(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/main/install.sh)" < /tmp/hiddify-install-config
+bash -c "$(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/refs/heads/dev/install.sh)" < /tmp/hiddify-install-config
 rm /tmp/hiddify-install-config
 
 # Ждем запуска Hiddify
