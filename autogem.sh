@@ -67,7 +67,7 @@ n
 8443
 EOF
 
-bash -c "$(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/main/install.sh)" < /tmp/hiddify-config
+bash -c "$(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/refs/heads/dev/install.sh)" < /tmp/hiddify-config
 rm /tmp/hiddify-config
 sleep 10
 
