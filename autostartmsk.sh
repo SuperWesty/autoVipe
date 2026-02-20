@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================
 # СКРИПТ 1: Установка МОСКОВСКОГО сервера с Hiddify
-# Версия: 4.0 (Hiddify Manager + AWG Pure MultiHop)
+# Версия: 4.1 (Исправлена установка Hiddify + авто-генерация секрета)
 # ============================================
 
 set -e
 
-echo "🚀 Установка московского сервера с Hiddify Manager v4.0"
+echo "🚀 Установка московского сервера с Hiddify Manager v4.1"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
@@ -24,6 +24,12 @@ step() { echo -e "${BLUE}[»]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && error "Запустите с правами root"
 
+# Функция генерации случайного секрета
+generate_secret() {
+    # Генерируем 16 символов: буквы и цифры
+    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1
+}
+
 # Параметры
 echo "📝 Настройка параметров:"
 echo ""
@@ -33,26 +39,34 @@ read -p "Доменное имя (moscow.example.com): " DOMAIN
 read -p "Email для Let's Encrypt: " EMAIL
 [[ -z "$EMAIL" ]] && error "Email обязателен!"
 
-read -p "Секретный путь для Hiddify админки [mySecretKey123]: " ADMIN_SECRET
-ADMIN_SECRET=${ADMIN_SECRET:-mySecretKey123}
+# Автоматическая генерация секретного пути
+ADMIN_SECRET=$(generate_secret)
+info "Автоматически сгенерирован секретный путь: $ADMIN_SECRET"
+echo ""
+
+read -p "Использовать этот секретный путь? (y/n, или введите свой): " SECRET_CHOICE
+if [[ "$SECRET_CHOICE" != "y" ]] && [[ "$SECRET_CHOICE" != "Y" ]] && [[ ! -z "$SECRET_CHOICE" ]]; then
+    ADMIN_SECRET="$SECRET_CHOICE"
+    info "Используется ваш секретный путь: $ADMIN_SECRET"
+fi
 
 echo ""
-warn "ВНИМАНИЕ: Hiddify требует чистую систему Ubuntu!"
+warn "ВНИМАНИЕ: Hiddify требует чистую систему Ubuntu 22.04+"
 read -p "Продолжить установку? (y/n): " CONFIRM
 [[ "$CONFIRM" != "y" ]] && exit 0
 
-step "Шаг 1/10: Обновление системы..."
+step "Шаг 1/11: Обновление системы..."
 apt update -qq
 apt upgrade -y -qq
 info "Система обновлена"
 
-step "Шаг 2/10: Установка базовых пакетов..."
+step "Шаг 2/11: Установка базовых пакетов..."
 apt install -y -qq curl wget nano git ufw wireguard \
   wireguard-tools qrencode nginx certbot \
   python3-certbot-nginx net-tools >/dev/null 2>&1
 info "Пакеты установлены"
 
-step "Шаг 3/10: Настройка системы..."
+step "Шаг 3/11: Настройка системы..."
 timedatectl set-timezone Europe/Moscow
 cat >> /etc/sysctl.conf << EOF
 net.ipv4.ip_forward=1
@@ -61,41 +75,59 @@ EOF
 sysctl -p >/dev/null 2>&1
 info "IP forwarding включен"
 
-step "Шаг 4/10: Определение интерфейса..."
+step "Шаг 4/11: Определение интерфейса..."
 INTERFACE=$(ip -br link show | grep -v lo | awk '{print $1}' | head -n1)
 SERVER_IP=$(curl -4 -s ifconfig.me)
 info "Интерфейс: $INTERFACE, IP: $SERVER_IP"
 
-step "Шаг 5/10: Установка Hiddify Manager..."
-warn "Это может занять 5-10 минут..."
+step "Шаг 5/11: Установка Hiddify Manager..."
+warn "Это может занять 10-15 минут..."
 
-# Создаем конфиг для автоматической установки
-cat > /tmp/hiddify-install-config << EOF
-1
+# Правильная установка Hiddify (БЕЗ stdin!)
+cd /tmp
+
+# Скачиваем скрипт установки
+wget -O hiddify-install.sh https://raw.githubusercontent.com/hiddify/Hiddify-Manager/main/install.sh
+
+# Делаем исполняемым
+chmod +x hiddify-install.sh
+
+# Запускаем установку с переменными окружения
+export ADMIN_SECRET="$ADMIN_SECRET"
+export DOMAIN="$DOMAIN"
+
+# Интерактивная установка (правильный способ)
+bash hiddify-install.sh << EOF
 $DOMAIN
 $ADMIN_SECRET
-
-
+$EMAIL
 n
-8443
 EOF
 
-# Запускаем установку с конфигом
-bash -c "$(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/refs/heads/dev/install.sh)" < /tmp/hiddify-install-config
-rm /tmp/hiddify-install-config
-
-# Ждем запуска Hiddify
-sleep 10
-
-# Настраиваем Hiddify на localhost
-if [ -f /opt/hiddify-manager/hiddify-panel/hiddifypanel.py ]; then
-    sed -i 's/0.0.0.0/127.0.0.1/g' /opt/hiddify-manager/hiddify-panel/config.py 2>/dev/null || true
-    systemctl restart hiddify-panel 2>/dev/null || true
+# Альтернативный метод если первый не сработал
+if [ ! -d "/opt/hiddify-manager" ]; then
+    warn "Пробуем альтернативный метод установки..."
+    bash <(curl -Lfo- https://raw.githubusercontent.com/hiddify/Hiddify-Manager/main/install.sh)
 fi
 
-info "Hiddify Manager установлен"
+# Ждем запуска Hiddify
+sleep 15
 
-step "Шаг 6/10: Генерация ключей AmneziaWG..."
+# Проверяем что Hiddify установлен
+if [ -d "/opt/hiddify-manager" ]; then
+    info "Hiddify Manager установлен"
+    
+    # Настраиваем на localhost (если возможно)
+    if [ -f "/opt/hiddify-manager/hiddify-panel/hiddifypanel.py" ]; then
+        # Пытаемся изменить конфигурацию на localhost
+        find /opt/hiddify-manager -type f -name "*.py" -exec sed -i 's/0\.0\.0\.0/127.0.0.1/g' {} \; 2>/dev/null || true
+        systemctl restart hiddify-panel 2>/dev/null || true
+    fi
+else
+    error "Ошибка установки Hiddify! Проверьте логи."
+fi
+
+step "Шаг 6/11: Генерация ключей AmneziaWG..."
 mkdir -p /etc/wireguard/clients
 
 # Ключи для прямого подключения
@@ -118,7 +150,7 @@ CLIENT_MULTIHOP_PUBLIC=$(cat /etc/wireguard/clients/client1-multihop-public.key)
 
 info "Ключи сгенерированы"
 
-step "Шаг 7/10: Настройка AmneziaWG wg1..."
+step "Шаг 7/11: Настройка AmneziaWG wg1..."
 
 cat > /etc/wireguard/wg1.conf << EOF
 [Interface]
@@ -157,7 +189,7 @@ wg-quick up wg1 >/dev/null 2>&1
 systemctl enable wg-quick@wg1 >/dev/null 2>&1
 info "AmneziaWG wg1 запущен"
 
-step "Шаг 8/10: Создание клиентских конфигураций..."
+step "Шаг 8/11: Создание клиентских конфигураций..."
 
 # Direct конфигурация
 cat > /etc/wireguard/clients/client1-moscow-direct.conf << EOF
@@ -212,11 +244,11 @@ EOF
 
 info "Клиентские конфигурации созданы"
 
-step "Шаг 9/10: Получение SSL сертификата..."
+step "Шаг 9/11: Получение SSL сертификата..."
 certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $EMAIL
 info "SSL сертификат получен"
 
-step "Шаг 10/10: Настройка Nginx..."
+step "Шаг 10/11: Настройка Nginx..."
 
 # Фейковый сайт
 cat > /var/www/html/index.html << 'HTMLEOF'
@@ -294,9 +326,9 @@ server {
         index index.html;
     }
 
-    # Hiddify Manager
-    location ~ ^/(admin|api|sub|subscription|user|api-admin) {
-        proxy_pass http://127.0.0.1:8443;
+    # Hiddify Manager - секретный путь + admin/api пути
+    location ~ ^/$ADMIN_SECRET/(admin|api|user) {
+        proxy_pass http://127.0.0.1:9000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -306,8 +338,9 @@ server {
         proxy_read_timeout 300s;
     }
 
-    location ~ ^/[a-zA-Z0-9]+/(vless|vmess|trojan) {
-        proxy_pass http://127.0.0.1:8443;
+    # Hiddify subscription пути
+    location ~ ^/[a-zA-Z0-9_-]{8,}/.+ {
+        proxy_pass http://127.0.0.1:9000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -318,7 +351,8 @@ server {
 NGINXEOF
 
 # Stream для WireGuard
-cat >> /etc/nginx/nginx.conf << 'STREAMEOF'
+if ! grep -q "stream {" /etc/nginx/nginx.conf; then
+    cat >> /etc/nginx/nginx.conf << 'STREAMEOF'
 
 stream {
     upstream wireguard_moscow {
@@ -332,6 +366,7 @@ stream {
     }
 }
 STREAMEOF
+fi
 
 ln -sf /etc/nginx/sites-available/multihop-moscow /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
@@ -394,7 +429,7 @@ chmod +x /etc/rc.local
 # Сохранение информации
 cat > /root/moscow-server-info.txt << INFOEOF
 ═══════════════════════════════════════════════════
-MOSCOW SERVER INFORMATION (Hiddify v4.0)
+MOSCOW SERVER INFORMATION (Hiddify v4.1)
 ═══════════════════════════════════════════════════
 
 Installation Date: $(date)
@@ -403,13 +438,15 @@ Domain: $DOMAIN
 
 ═══ HIDDIFY MANAGER ═══
 URL: https://$DOMAIN/$ADMIN_SECRET/admin/
-Panel Port: 8443 (localhost only)
+Секретный путь: $ADMIN_SECRET
+
+⚠️ ВАЖНО! СОХРАНИТЕ СЕКРЕТНЫЙ ПУТЬ!
+Без него вы не сможете войти в панель!
 
 Первый вход:
-1. Откройте панель по ссылке выше
-2. Создайте admin пользователя
-3. Settings → Network → Listen IP: 127.0.0.1
-4. Users → Add User → создайте пользователей
+1. Откройте: https://$DOMAIN/$ADMIN_SECRET/admin/
+2. Создайте admin аккаунт
+3. Настройте пользователей
 
 ═══ ОТКРЫТЫЕ ПОРТЫ (UFW) ═══
 22/tcp  - SSH
@@ -417,8 +454,8 @@ Panel Port: 8443 (localhost only)
 443     - HTTPS (Hiddify, WireGuard, Web)
 
 ═══ AMNEZIAWG KEYS ═══
-Server Public:  $SERVER_PUBLIC
-Client Direct:  $CLIENT_DIRECT_PUBLIC
+Server Public:   $SERVER_PUBLIC
+Client Direct:   $CLIENT_DIRECT_PUBLIC
 Client MultiHop: $CLIENT_MULTIHOP_PUBLIC
 
 ═══ КЛИЕНТСКИЕ КОНФИГУРАЦИИ ═══
@@ -426,17 +463,16 @@ Moscow Direct:   /etc/wireguard/clients/client1-moscow-direct.conf
 Moscow MultiHop: /etc/wireguard/clients/client1-moscow-multihop.conf
 
 ═══ СЛЕДУЮЩИЕ ШАГИ ═══
-1. Войдите в панель Hiddify и создайте пользователей
-2. Настройте немецкий сервер
-3. Создайте WireGuard туннель (wg0) между серверами
-4. Запустите скрипты маршрутизации:
-   /root/setup-multihop-hiddify.sh
-   /root/setup-multihop-awg-pure.sh
+1. Войдите в Hiddify: https://$DOMAIN/$ADMIN_SECRET/admin/
+2. Создайте пользователей
+3. Настройте немецкий сервер
+4. Создайте туннель wg0
+5. Запустите скрипты маршрутизации
 
 ═══ ВАРИАНТЫ ПОДКЛЮЧЕНИЯ ═══
-1. Hiddify MultiHop - через subscription link из панели
-2. AWG Direct - через QR-код ниже
-3. AWG Pure MultiHop - через QR-код (после настройки туннеля)
+1. Hiddify - через subscription link из панели
+2. AWG Direct - QR-код ниже
+3. AWG Pure MultiHop - QR-код (после туннеля)
 
 INFOEOF
 
@@ -448,7 +484,10 @@ echo ""
 echo "📋 Информация: /root/moscow-server-info.txt"
 echo ""
 echo "🎨 Hiddify Panel:"
-echo "   https://$DOMAIN/$ADMIN_SECRET/admin/"
+echo -e "   ${YELLOW}https://$DOMAIN/$ADMIN_SECRET/admin/${NC}"
+echo ""
+echo -e "${RED}⚠️  ВАЖНО! СОХРАНИТЕ СЕКРЕТНЫЙ ПУТЬ:${NC}"
+echo -e "   ${GREEN}$ADMIN_SECRET${NC}"
 echo ""
 echo "🔐 QR-коды AmneziaWG:"
 echo ""
@@ -458,10 +497,11 @@ echo ""
 echo "Moscow MultiHop (настроить после туннеля):"
 qrencode -t ansiutf8 < /etc/wireguard/clients/client1-moscow-multihop.conf
 echo ""
-echo "⚠️  ВАЖНО:"
-echo "1. Войдите в панель Hiddify и создайте пользователей"
-echo "2. Settings → Network → установите Listen IP: 127.0.0.1"
+echo "📝 Скопируйте и сохраните информацию выше!"
+echo ""
+echo "⏭️  Следующие шаги:"
+echo "1. Откройте панель Hiddify"
+echo "2. Создайте admin пользователя"
 echo "3. Настройте немецкий сервер"
 echo "4. Создайте туннель wg0"
 echo ""
-echo "🎉 Готово! Переходите к немецкому серверу."
