@@ -8,12 +8,15 @@ set -e
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
 # Проверка root
-if [ "$EUID" -ne 0 ]; then echo -e "${RED}Run as root!${NC}"; exit 1; fi
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}Run as root!${NC}"
+    exit 1
+fi
 
 # Функция для вопроса Да/Нет
 ask_yes_no() {
     while true; do
-        read -p "$(echo -e ${YELLOW}$1 (y/n): ${NC})" yn
+        read -p "$(echo -e "${YELLOW}$1 (y/n): ${NC}")" yn
         case $yn in
             [Yy]* ) return 0;;
             [Nn]* ) return 1;;
@@ -24,7 +27,7 @@ ask_yes_no() {
 
 # Функция проверки установлен ли пакет
 is_installed() {
-    command -v $1 &> /dev/null
+    command -v "$1" &> /dev/null
 }
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
@@ -47,22 +50,24 @@ fi
 
 if [ "$SKIP_CRON" = false ]; then
     if ask_yes_no "Установить и настроить Cron?"; then
-        echo -e "${YELLOW}Установка cron...${NC}"        apt update -qq
+        echo -e "${YELLOW}Установка cron...${NC}"
+        apt update -qq
         apt install -y -qq cron
+
         systemctl enable --now cron
-        
+
         # Проверка что crontab теперь доступен
         if ! is_installed crontab; then
             echo -e "${YELLOW}crontab не в PATH, пробуем альтернативу...${NC}"
             apt install -y -qq cron-daemon-common 2>/dev/null || true
         fi
-        
+
         # Принудительное добавление в PATH если нужно
         if ! is_installed crontab; then
             export PATH="/usr/bin:/bin:$PATH"
-            echo "export PATH=\"/usr/bin:/bin:\$PATH\"" >> /root/.bashrc
+            echo 'export PATH="/usr/bin:/bin:$PATH"' >> /root/.bashrc
         fi
-        
+
         systemctl restart cron
         echo -e "${GREEN}✓ Cron установлен и запущен${NC}"
     else
@@ -96,6 +101,7 @@ if [ "$SKIP_DOCKER" = false ]; then
     fi
 fi
 echo ""
+
 # =============================================================================
 # ШАГ 3: UFW (Firewall)
 # =============================================================================
@@ -112,14 +118,14 @@ if [ "$SKIP_UFW" = false ]; then
     if ask_yes_no "Установить и настроить UFW?"; then
         echo -e "${YELLOW}Настройка UFW...${NC}"
         apt install -y -qq ufw
-        
+
         # Настройка портов
         read -p "Открыть порты WireGuard (51820, 31456)? (y/n): " open_wg
         ufw --force reset
         ufw allow 22/tcp comment 'SSH'
         ufw allow 80/tcp comment 'HTTP'
         ufw allow 443/tcp comment 'HTTPS/VPN/Reality'
-        
+
         if [[ "$open_wg" =~ ^[Yy]$ ]]; then
             ufw allow 51820/udp comment 'WireGuard (Server Link)'
             ufw allow 31456/udp comment 'AmneziaWG (Client)'
@@ -127,7 +133,7 @@ if [ "$SKIP_UFW" = false ]; then
         else
             echo -e "${YELLOW}⚠ Порты WG закрыты (только 443)${NC}"
         fi
-        
+
         ufw default deny incoming
         ufw default allow outgoing
         echo "y" | ufw enable
@@ -145,7 +151,8 @@ echo -e "${BLUE}━━━ Шаг 4: Бэкап-система ━━━${NC}"
 if [ -d "/root/backups/scripts" ] && [ -f "/root/backups/scripts/backup-hiddify.sh" ]; then
     echo -e "${GREEN}✓ Бэкап-система уже существует${NC}"
     SKIP_BACKUP=true
-else    echo -e "${YELLOW}⚠ Бэкап-система не найдена${NC}"
+else
+    echo -e "${YELLOW}⚠ Бэкап-система не найдена${NC}"
     SKIP_BACKUP=false
 fi
 
@@ -194,7 +201,8 @@ SCRIPT
     else
         echo -e "${YELLOW}⊘ Пропущено${NC}"
     fi
-fiecho ""
+fi
+echo ""
 
 # =============================================================================
 # ШАГ 5: HIDDIFY MANAGER
@@ -230,10 +238,21 @@ echo -e "${GREEN}╠════════════════════
 echo -e "${GREEN}║  📊 Проверка сервисов:                                 ║${NC}"
 
 # Проверка статусов
-is_installed crontab && systemctl is-active --quiet cron && echo -e "${GREEN}  ✓ Cron работает${NC}" || echo -e "${RED}  ✗ Cron не работает${NC}"
-is_installed docker && systemctl is-active --quiet docker && echo -e "${GREEN}  ✓ Docker работает${NC}" || echo -e "${RED}  ✗ Docker не работает${NC}"
-is_installed ufw && ufw status | grep -q "Status: active" && echo -e "${GREEN}  ✓ UFW активен${NC}" || echo -e "${YELLOW}  ⚠ UFW не активен${NC}"
-[ -d "/opt/hiddify-manager" ] && echo -e "${GREEN}  ✓ Hiddify установлен${NC}" || echo -e "${YELLOW}  ⚠ Hiddify не установлен${NC}"
+is_installed crontab && systemctl is-active --quiet cron \
+    && echo -e "${GREEN}  ✓ Cron работает${NC}" \
+    || echo -e "${RED}  ✗ Cron не работает${NC}"
+
+is_installed docker && systemctl is-active --quiet docker \
+    && echo -e "${GREEN}  ✓ Docker работает${NC}" \
+    || echo -e "${RED}  ✗ Docker не работает${NC}"
+
+is_installed ufw && ufw status | grep -q "Status: active" \
+    && echo -e "${GREEN}  ✓ UFW активен${NC}" \
+    || echo -e "${YELLOW}  ⚠ UFW не активен${NC}"
+
+[ -d "/opt/hiddify-manager" ] \
+    && echo -e "${GREEN}  ✓ Hiddify установлен${NC}" \
+    || echo -e "${YELLOW}  ⚠ Hiddify не установлен${NC}"
 
 echo -e "${GREEN}╠════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  📁 Бэкапы: /root/backups/                             ║${NC}"
@@ -243,4 +262,5 @@ echo -e "${GREEN}╚════════════════════
 # Финальная проверка crontab
 if is_installed crontab; then
     echo -e "${YELLOW}📅 Текущие cron-задачи:${NC}"
-    crontab -l 2>/dev/null || echo "  Нет задач"fi
+    crontab -l 2>/dev/null || echo "  Нет задач"
+fi
