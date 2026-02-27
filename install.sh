@@ -87,6 +87,11 @@ echo ""
 read -rp "$(echo -e "${YELLOW}Всё верно? Продолжить? [y/N]:${NC} ")" CONFIRM
 [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && echo "Отмена." && exit 0
 
+# ─── ПОДАВЛЯЕМ ИНТЕРАКТИВНЫЕ ВОПРОСЫ APT ─────────────────
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 # ─── ОБНОВЛЕНИЕ СИСТЕМЫ ───────────────────────────────────
 header "Шаг 1: Обновление системы"
 apt update -qq && apt upgrade -y -qq
@@ -238,7 +243,20 @@ log "Nginx установлен и заглушка настроена"
 
 # ─── SSL СЕРТИФИКАТ ───────────────────────────────────────
 header "Шаг 4: Получение SSL сертификата (Let's Encrypt)"
-apt install -y -qq certbot python3-certbot-nginx
+apt install -y -qq certbot python3-certbot-nginx dnsutils
+
+# Проверяем что домен резолвится и указывает на этот сервер
+info "Проверяем DNS для $DOMAIN..."
+DOMAIN_IP=$(dig +short "$DOMAIN" A 2>/dev/null | tail -1)
+if [ -z "$DOMAIN_IP" ]; then
+    error "Домен $DOMAIN не резолвится! Добавь A-запись $DOMAIN → $SERVER_IP и подожди 5-30 минут"
+fi
+if [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
+    warn "ВНИМАНИЕ: $DOMAIN указывает на $DOMAIN_IP, а IP этого сервера $SERVER_IP"
+    read -rp "$(echo -e "${YELLOW}Продолжить всё равно? [y/N]:${NC} ")" DNS_CONFIRM
+    [[ ! "$DNS_CONFIRM" =~ ^[Yy]$ ]] && error "Исправь DNS и запусти скрипт заново"
+fi
+log "DNS проверен: $DOMAIN → $DOMAIN_IP"
 
 info "Получаем сертификат для $DOMAIN..."
 certbot --nginx -d "$DOMAIN" \
