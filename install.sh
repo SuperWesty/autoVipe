@@ -341,15 +341,42 @@ log "Nginx настроен с проксированием 3X-UI"
 
 # ─── УСТАНОВКА 3X-UI ──────────────────────────────────────
 header "Шаг 6: Установка 3X-UI"
-info "Запускаем официальный установщик 3X-UI..."
-info "⚠️  Установщик задаст вопросы — укажи порт ${BOLD}$PANEL_PORT${NC} и путь ${BOLD}/$PANEL_PATH${NC}"
-echo ""
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+info "Скачиваем установщик 3X-UI и передаём ответы автоматически..."
+
+# Скачиваем скрипт во временный файл
+TMP_3XUI=$(mktemp /tmp/3xui_XXXX.sh)
+curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh -o "$TMP_3XUI"
+chmod +x "$TMP_3XUI"
+
+# Автоматически отвечаем на вопросы установщика:
+#   "Customize Panel Port?" -> y
+#   "Panel port:"           -> $PANEL_PORT
+#   "SSL method (1/2/3):"   -> 3 (использовать существующий сертификат)
+#   "Domain/IP:"            -> $DOMAIN
+#   "Cert path:"            -> путь к fullchain.pem от certbot
+#   "Key path:"             -> путь к privkey.pem от certbot
+{
+    echo "y"
+    echo "$PANEL_PORT"
+    echo "3"
+    echo "$DOMAIN"
+    echo "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+    echo "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+} | bash "$TMP_3XUI"
+
+rm -f "$TMP_3XUI"
+
+# Выставляем кастомный путь к панели
+sleep 3
+x-ui setting -webBasePath "$PANEL_PATH" 2>/dev/null || true
+x-ui restart 2>/dev/null || systemctl restart x-ui 2>/dev/null || true
+sleep 2
 
 # Закрываем прямой внешний доступ к порту панели
-# Панель теперь доступна только через nginx на 443
 ufw delete allow $PANEL_PORT/tcp 2>/dev/null || true
 log "3X-UI установлен"
+log "Панель доступна: https://$DOMAIN/$PANEL_PATH"
+
 
 # ─── DOCKER ───────────────────────────────────────────────
 if [[ "$INSTALL_AWG" =~ ^[Yy]$ ]]; then
@@ -366,28 +393,19 @@ if [[ "$INSTALL_AWG" =~ ^[Yy]$ ]]; then
     # ─── AMNEZIA-WG-EASY ──────────────────────────────────
     header "Шаг 8: Установка amnezia-wg-easy (w0rng)"
 
-    # Генерируем bcrypt хеш пароля
-    info "Генерируем bcrypt хеш пароля..."
-    
-    # Проверяем наличие python3 с bcrypt или htpasswd
-    if python3 -c "import bcrypt" 2>/dev/null; then
-        AWG_HASH=$(python3 -c "
-import bcrypt, sys
-password = sys.argv[1].encode()
-hashed = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12))
-print(hashed.decode())
-" "$AWG_PASSWORD")
-    else
-        pip3 install bcrypt -q 2>/dev/null || pip install bcrypt -q 2>/dev/null
-        AWG_HASH=$(python3 -c "
-import bcrypt, sys
-password = sys.argv[1].encode()
-hashed = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12))
-print(hashed.decode())
-" "$AWG_PASSWORD")
+    # Генерируем bcrypt хеш пароля для AWG Easy
+    info "Генерируем bcrypt хеш пароля (через htpasswd)..."
+
+    apt install -y -qq apache2-utils
+    # htpasswd -B = bcrypt, -C 10 = cost factor, вырезаем только хеш (после двоеточия)
+    AWG_HASH=$(htpasswd -nbB -C 10 admin "$AWG_PASSWORD" | cut -d: -f2)
+
+    if [ -z "$AWG_HASH" ]; then
+        error "Не удалось сгенерировать bcrypt хеш. Установи apache2-utils вручную."
     fi
 
-    info "Хеш пароля сгенерирован"
+    info "Хеш пароля сгенерирован успешно"
+
 
     # Создаём директорию для данных
     mkdir -p /opt/amnezia-wg-easy
