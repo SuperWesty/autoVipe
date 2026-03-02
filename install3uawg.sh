@@ -184,6 +184,10 @@ server {
 TMPEOF
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+# Увеличиваем bucket size для длинных доменов (поддомены типа ag.example.com)
+if ! grep -q 'server_names_hash_bucket_size' /etc/nginx/nginx.conf; then
+    sed -i '/http {/a\\tserver_names_hash_bucket_size 64;' /etc/nginx/nginx.conf
+fi
 nginx -t && systemctl reload nginx
 log "Nginx и заглушка готовы"
 
@@ -375,7 +379,8 @@ server {
 
     # 3X-UI панель (рандомный путь от установщика)
     location /$XRAY_BASE_PATH {
-        proxy_pass         http://127.0.0.1:$PANEL_PORT;
+        proxy_pass         https://127.0.0.1:$PANEL_PORT;
+        proxy_ssl_verify   off;
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
         proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
@@ -386,7 +391,8 @@ server {
     }
 
     location /$XRAY_BASE_PATH/ {
-        proxy_pass         http://127.0.0.1:$PANEL_PORT;
+        proxy_pass         https://127.0.0.1:$PANEL_PORT;
+        proxy_ssl_verify   off;
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
         proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
